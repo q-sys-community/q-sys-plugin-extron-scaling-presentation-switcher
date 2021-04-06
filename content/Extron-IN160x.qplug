@@ -1,0 +1,827 @@
+-- Plugin for Extron IN160x series Scaling Presentation Switchers by Solo Works London
+-- Built in Lua
+-- For source, contact https://soloworks.co.uk
+
+PluginInfo = {
+    Name = "Extron~Scaling Presentation Switcher (0.0.0.0)", -- The tilde here indicates folder structure in the Shematic Elements pane
+    Version = "0.0.0.1",
+    Id = "qsysc.extron.in160x.0.0.0.1", -- show this is just a unique id. Show some commented out 'fun' unique ids
+    Description = "Control for Extron IN160x series scaling presentation switchers",
+    ShowDebug = true,
+    Author = "Solo Works London"
+}
+
+-- Once you've drawn your plugin in Designer, you can determine what colors you use a lot. Save yourself some time by putting them in a table, and then simply calling them later.
+local Colors = {
+    extron_blue = {31, 79, 162},
+    White = {255, 255, 255},
+    Black = {0, 0, 0},
+    Red = {255, 0, 0},
+    Green = {0, 255, 0}
+}
+
+function GetColor(props)
+    return Colors.extron_blue
+end
+
+-- We can let users determine some of the plugin properties by exposing them here
+-- While this function can be very useful, it is completely optional and not always needed.
+-- If no Properties are set here, only the position and fill properties of your plugin will show in the Properties pane
+function GetProperties()
+    props = {
+        {
+            Name = "IP Address",
+            Type = "string",
+            Value = "127.0.0.1"
+        },
+        {
+            Name = "Model",
+            Type = "enum",
+            Choices = {"IN1606", "IN1608"},
+            Value = "IN1606"
+        }
+    }
+    return props
+end
+
+local max_sources = 8
+local every_other = false
+-- The below function is optional (like GetProperties() is), but it can allow further customization of what users can and can't do with your plugin.
+-- In this example, when Model 1 is selected in the properties pane, the ability to modify some of the properties will be hidden, only allowing customization with Model 2
+-- Another application of this is if you have different input/output types for different models, and want those properties to be dynamic in the Properties pane
+function RectifyProperties(props)
+    return props
+end
+
+-- The below function is where you will populate the controls for your plugin.
+-- If you've written some of the Runtime code already, simply use the control names you populated in Text Controller/Control Script, and use their Properties to inform the values here
+-- ControlType can be Button, Knob, Indicator or Text
+-- ButtonType ( ControlType == Button ) can be Momentary, Toggle or Trigger
+-- IndicatorType ( ControlType == Indicator ) can be Led, Meter, Text or Status
+-- ControlUnit ( ControlType == Knob ) can be Hz, Float, Integer, Pan, Percent, Position or Seconds
+function GetControls(props)
+    ctls = {
+        -- System Pins
+        {
+            Name = "online",
+            ControlType = "Indicator",
+            IndicatorType = "Led",
+            PinStyle = "Output",
+            Count = 1,
+            UserPin = true
+        },
+        {
+            Name = "ip_address",
+            ControlType = "Indicator",
+            IndicatorType = "Status",
+            PinStyle = "Both",
+            Count = 1,
+            UserPin = true
+        },
+        {
+            Name = "model",
+            ControlType = "Indicator",
+            IndicatorType = "Status",
+            PinStyle = "Output",
+            Count = 1,
+            UserPin = true
+        },
+        {
+            Name = "part_no",
+            ControlType = "Indicator",
+            IndicatorType = "Text",
+            PinStyle = "Output",
+            Count = 1,
+            UserPin = true
+        },
+        {
+            Name = "firmware_version",
+            ControlType = "Indicator",
+            IndicatorType = "Text",
+            PinStyle = "Output",
+            Count = 1,
+            UserPin = true
+        },
+        {
+            Name = "front_panel_lock",
+            ControlType = "Text",
+            PinStyle = "Both",
+            UserPin = true
+        },
+        {
+            Name = "device_name",
+            ControlType = "Text",
+            PinStyle = "Both",
+            UserPin = true
+        },
+        {
+            Name = "autoswitch_mode",
+            ControlType = "Text",
+            PinStyle = "Both",
+            UserPin = true
+        },
+        {
+            Name = "switcher_output",
+            ControlType = "Text",
+            PinStyle = "Both",
+            UserPin = true
+        },
+        {
+            Name = "program_volume_mute",
+            ControlType = "Button",
+            ButtonType = "Toggle",
+            PinStyle = "Both",
+            UserPin = true
+        },
+        {
+            Name = "mic_volume_mute",
+            ControlType = "Button",
+            ButtonType = "Toggle",
+            PinStyle = "Both",
+            UserPin = true
+        },
+        {
+            Name = "output_volume_mute",
+            ControlType = "Button",
+            ButtonType = "Toggle",
+            PinStyle = "Both",
+            UserPin = true
+        },
+        {
+            Name = "program_volume_gain",
+            ControlType = "Knob",
+            ControlUnit = "Integer",
+            Min = -1000,
+            Max = 0,
+            PinStyle = "Both",
+            Count = 1,
+            UserPin = true
+        },
+        {
+            Name = "mic_volume_gain",
+            ControlType = "Knob",
+            ControlUnit = "Integer",
+            Min = -1000,
+            Max = 0,
+            PinStyle = "Both",
+            Count = 1,
+            UserPin = true
+        },
+        {
+            Name = "output_volume_gain",
+            ControlType = "Knob",
+            ControlUnit = "Integer",
+            Min = -1000,
+            Max = 0,
+            PinStyle = "Both",
+            Count = 1,
+            UserPin = true
+        }
+    }
+    for s = 1, max_sources do
+        table.insert(
+            ctls,
+            {
+                Name = "input_select_" .. s,
+                ControlType = "Button",
+                ButtonType = "Toggle",
+                PinStyle = "Both",
+                UserPin = true
+            }
+        )
+        table.insert(
+            ctls,
+            {
+                Name = "input_signal_" .. s,
+                ControlType = "Indicator",
+                IndicatorType = "Led",
+                PinStyle = "Output",
+                UserPin = true
+            }
+        )
+    end
+    return ctls
+end
+
+-- Variable holding Page Names for ease
+local pagenames = {"Display"}
+
+-- This function allows you to populate pages in your plugin.
+function GetPages(props)
+    pages = {}
+    table.insert(pages, {name = pagenames[1]})
+    return pages
+end
+
+-- This function allows you to layout pages in your plugin.
+function GetControlLayout(props)
+    local layout = {}
+
+    input_count = string.match(props["Model"].Value, "IN160(%d)")
+
+    local title_size = {224, 32}
+    local btn_size = {32, 24}
+    local status_groupbox_size = {title_size[1], 7 * btn_size[2]}
+    local switcher_groupbox_position = {0, title_size[2] + status_groupbox_size[2] + (0.5 * btn_size[2])}
+    local switcher_groupbox_size = {title_size[1], (3 * btn_size[2] + (input_count * btn_size[2]))}
+    local audio_groupbox_position = {0, switcher_groupbox_position[2] + switcher_groupbox_size[2] + (0.5 * btn_size[2])}
+    local audio_groupbox_size = {title_size[1], (4.5 * btn_size[2])}
+
+    graphics = {
+        {
+            Type = "Header",
+            Text = "Extron " .. props["Model"].Value,
+            HTextAlign = "Center",
+            Color = Colors.extron_blue,
+            FontSize = 16,
+            Position = {0, 0},
+            Size = title_size
+        },
+        {
+            Type = "GroupBox",
+            Text = "Status",
+            HTextAlign = "Left",
+            Fill = Colors.White,
+            CornerRadius = 8,
+            StrokeColor = Colors.extron_blue,
+            Color = Colors.extron_blue,
+            StrokeWidth = 1,
+            Position = {0, title_size[2]},
+            Size = status_groupbox_size
+        },
+        {
+            Type = "Text",
+            Text = "Online:",
+            Font = "Roboto",
+            FontSize = 12,
+            FontStyle = "Bold",
+            HTextAlign = "Right",
+            Color = Colors.Black,
+            Position = {0, title_size[2] + (0.5 * btn_size[2])},
+            Size = {3 * btn_size[1], btn_size[2]}
+        },
+        {
+            Type = "Text",
+            Text = "IP Address:",
+            Font = "Roboto",
+            FontSize = 12,
+            FontStyle = "Bold",
+            HTextAlign = "Right",
+            Color = Colors.Black,
+            Position = {0, title_size[2] + (1.5 * btn_size[2])},
+            Size = {3 * btn_size[1], btn_size[2]}
+        },
+        {
+            Type = "Text",
+            Text = "Model:",
+            Font = "Roboto",
+            FontSize = 12,
+            FontStyle = "Bold",
+            HTextAlign = "Right",
+            Color = Colors.Black,
+            Position = {0, title_size[2] + (2.5 * btn_size[2])},
+            Size = {3 * btn_size[1], btn_size[2]}
+        },
+        --[[{
+            Type = "Text",
+            Text = "Part Number:",
+            Font = "Roboto",
+            FontSize = 12,
+            FontStyle = "Bold",
+            HTextAlign = "Right",
+            Color = Colors.Black,
+            Position = {0, 60},
+            Size = {100, 20}
+        },
+        {
+            Type = "Text",
+            Text = "Firmware:",
+            Font = "Roboto",
+            FontSize = 12,
+            FontStyle = "Bold",
+            HTextAlign = "Right",
+            Color = Colors.Black,
+            Position = {0, title_size[2]+(3.5*btn_size[2])},
+            Size = {3*btn_size[1], btn_size[2]}
+        },]]
+        {
+            Type = "Text",
+            Text = "Device Name:",
+            Font = "Roboto",
+            FontSize = 12,
+            FontStyle = "Bold",
+            HTextAlign = "Right",
+            Color = Colors.Black,
+            Position = {0, title_size[2] + (3.5 * btn_size[2])},
+            Size = {3 * btn_size[1], btn_size[2]}
+        },
+        {
+            Type = "Text",
+            Text = "Front Panel Lock:",
+            Font = "Roboto",
+            FontSize = 11.5,
+            FontStyle = "Bold",
+            HTextAlign = "Right",
+            Color = Colors.Black,
+            Position = {0, title_size[2] + (4.5 * btn_size[2])},
+            Size = {3 * btn_size[1], btn_size[2]}
+        },
+        {
+            Type = "Text",
+            Text = "Autoswitch Mode:",
+            Font = "Roboto",
+            FontSize = 11.5,
+            FontStyle = "Bold",
+            HTextAlign = "Right",
+            Color = Colors.Black,
+            Position = {0, title_size[2] + (5.5 * btn_size[2])},
+            Size = {3 * btn_size[1], btn_size[2]}
+        },
+        {
+            Type = "GroupBox",
+            Text = "Switcher",
+            HTextAlign = "Left",
+            Fill = Colors.White,
+            CornerRadius = 8,
+            StrokeColor = Colors.extron_blue,
+            Color = Colors.extron_blue,
+            StrokeWidth = 1,
+            Position = switcher_groupbox_position,
+            Size = switcher_groupbox_size
+        },
+        {
+            Type = "Text",
+            Text = "Signal",
+            FontSize = 10,
+            Position = {
+                switcher_groupbox_position[1],
+                (switcher_groupbox_position[2] + 0.5 * btn_size[2] + btn_size[2])
+            },
+            Size = btn_size
+        },
+        {
+            Type = "GroupBox",
+            Text = "Audio",
+            HTextAlign = "Left",
+            Fill = Colors.White,
+            CornerRadius = 8,
+            StrokeColor = Colors.extron_blue,
+            Color = Colors.extron_blue,
+            StrokeWidth = 1,
+            Position = audio_groupbox_position,
+            Size = audio_groupbox_size
+        },
+        {
+            Type = "Text",
+            Text = "Program Volume:",
+            FontSize = 10,
+            HTextAlign = "Right",
+            Position = {audio_groupbox_position[1], audio_groupbox_position[2] + (1 * btn_size[2])},
+            Size = {3 * btn_size[1], btn_size[2]}
+        },
+        {
+            Type = "Text",
+            Text = "Mic Volume:",
+            FontSize = 10,
+            HTextAlign = "Right",
+            Position = {audio_groupbox_position[1], audio_groupbox_position[2] + (2 * btn_size[2])},
+            Size = {3 * btn_size[1], btn_size[2]}
+        },
+        {
+            Type = "Text",
+            Text = "Output Volume:",
+            FontSize = 10,
+            HTextAlign = "Right",
+            Position = {audio_groupbox_position[1], audio_groupbox_position[2] + (3 * btn_size[2])},
+            Size = {3 * btn_size[1], btn_size[2]}
+        }
+    }
+    for i = 1, input_count do
+        table.insert(
+            graphics,
+            {
+                Type = "Text",
+                Text = "In" .. i,
+                Position = {
+                    (switcher_groupbox_position[1] + btn_size[1]),
+                    (switcher_groupbox_position[2] + 0.5 * btn_size[2] + (1 * btn_size[2])) + (i * btn_size[2])
+                },
+                Size = btn_size
+            }
+        )
+    end
+
+    -- System
+    layout["online"] = {
+        PrettyName = "System~Online",
+        Style = "Indicator",
+        Margin = 4,
+        Color = {0, 255, 0},
+        Position = {3 * btn_size[1], title_size[2] + (0.5 * btn_size[2])},
+        Size = {btn_size[2], btn_size[2]}
+    }
+    layout["ip_address"] = {
+        PrettyName = "System~IP Address",
+        Style = "TextBox",
+        Position = {3 * btn_size[1], title_size[2] + (1.5 * btn_size[2])},
+        Size = {3 * btn_size[1], btn_size[2]}
+    }
+    layout["model"] = {
+        PrettyName = "System~Model Name",
+        Style = "Text",
+        Position = {3 * btn_size[1], title_size[2] + (2.5 * btn_size[2])},
+        Size = {3 * btn_size[1], btn_size[2]}
+    }
+    --[[layout["part_no"] = {
+        PrettyName = "System~Part Number",
+        Style = "Text",
+        Position = {100, 60},
+        Size = {100, 20}
+    }
+    layout["firmware_version"] = {
+        PrettyName = "System~Firmware Version",
+        Style = "Text",
+        Position = {3*btn_size[1], title_size[2]+(3.5*btn_size[2])},
+        Size = {3*btn_size[1], btn_size[2]}
+    }]]
+    layout["device_name"] = {
+        PrettyName = "System~Device Name",
+        Style = "Text",
+        Position = {3 * btn_size[1], title_size[2] + (3.5 * btn_size[2])},
+        Size = {3 * btn_size[1], btn_size[2]}
+    }
+    layout["front_panel_lock"] = {
+        PrettyName = "System~Front Panel Lock",
+        Style = "ComboBox",
+        Position = {3 * btn_size[1], title_size[2] + (4.5 * btn_size[2])},
+        Size = {3 * btn_size[1], btn_size[2]}
+    }
+    layout["autoswitch_mode"] = {
+        PrettyName = "Switcher~Autoswitch Mode",
+        Style = "ComboBox",
+        Position = {3 * btn_size[1], title_size[2] + (5.5 * btn_size[2])},
+        Size = {3 * btn_size[1], btn_size[2]}
+    }
+    layout["switcher_output"] = {
+        PrettyName = "Switcher~Select",
+        Style = "Text",
+        Position = {
+            (switcher_groupbox_position[1] + 2 * btn_size[1]),
+            (switcher_groupbox_position[2] + 0.5 * btn_size[2] + btn_size[2])
+        },
+        Size = btn_size
+    }
+    for s = 1, input_count do
+        -- Source Select
+        layout["input_select_" .. s] = {
+            PrettyName = "Switcher~" .. string.format("Input %1i Select", s),
+            Style = "Button",
+            Legend = tostring(s),
+            Position = {
+                (switcher_groupbox_position[1] + 2 * btn_size[1]),
+                (switcher_groupbox_position[2] + 0.5 * btn_size[2] + (s + 1) * btn_size[2])
+            },
+            Size = btn_size
+        }
+        -- Source Signal
+        layout["input_signal_" .. s] = {
+            PrettyName = "Signal Presence~" .. string.format("Input %1i Signal", s),
+            Style = "Indicator",
+            Color = {0, 255, 0},
+            Margin = 4,
+            Position = {
+                (switcher_groupbox_position[1] + (btn_size[1] - btn_size[2]) / 2),
+                (switcher_groupbox_position[2] + 0.5 * btn_size[2] + (s + 1) * btn_size[2])
+            },
+            Size = {btn_size[2], btn_size[2]}
+        }
+    end
+    layout["program_volume_mute"] = {
+        PrettyName = "Audio~" .. string.format("Program Mute"),
+        Style = "Button",
+        Legend = "Mute",
+        Color = {223, 0, 36},
+        Margin = 1,
+        Position = {
+            audio_groupbox_position[1] + (3 * btn_size[1]),
+            audio_groupbox_position[2] + (1 * btn_size[2])
+        },
+        Size = btn_size
+    }
+    layout["mic_volume_mute"] = {
+        PrettyName = "Audio~" .. string.format("Mic Mute"),
+        Style = "Button",
+        Legend = "Mute",
+        Color = {223, 0, 36},
+        Margin = 1,
+        Position = {
+            audio_groupbox_position[1] + (3 * btn_size[1]),
+            audio_groupbox_position[2] + (2 * btn_size[2])
+        },
+        Size = btn_size
+    }
+    layout["output_volume_mute"] = {
+        PrettyName = "Audio~" .. string.format("Output Mute"),
+        Style = "Button",
+        Legend = "Mute",
+        Color = {223, 0, 36},
+        Margin = 1,
+        Position = {
+            audio_groupbox_position[1] + (3 * btn_size[1]),
+            audio_groupbox_position[2] + (3 * btn_size[2])
+        },
+        Size = btn_size
+    }
+    layout["program_volume_gain"] = {
+        PrettyName = "Audio~Program Gain",
+        Style = "Fader",
+        Position = {audio_groupbox_position[1] + (4 * btn_size[1]), audio_groupbox_position[2] + (1 * btn_size[2])},
+        Size = {3 * btn_size[1], btn_size[2]}
+    }
+    layout["mic_volume_gain"] = {
+        PrettyName = "Audio~Mic Gain",
+        Style = "Fader",
+        Position = {audio_groupbox_position[1] + (4 * btn_size[1]), audio_groupbox_position[2] + (2 * btn_size[2])},
+        Size = {3 * btn_size[1], btn_size[2]}
+    }
+    layout["output_volume_gain"] = {
+        PrettyName = "Audio~Output Gain",
+        Style = "Fader",
+        Position = {audio_groupbox_position[1] + (4 * btn_size[1]), audio_groupbox_position[2] + (3 * btn_size[2])},
+        Size = {3 * btn_size[1], btn_size[2]}
+    }
+    return layout, graphics
+end
+
+if Controls then
+    -- Local Structure for holding State
+    Extron = {
+        Host = "",
+        Port = 23,
+        Rx = ""
+    }
+
+    -- Build TCP Client
+    conn = TcpSocket.New()
+    conn.ReadTimeout = 0
+    conn.WriteTimeout = 0
+    conn.ReconnectTimeout = 5
+
+    -- Create and setup the Communications Timeout
+    timerComms = Timer.New()
+    timerComms.EventHandler = function(timer)
+        timer:Stop()
+        Controls.Online.Boolean = false
+        print("Connection Timed Out")
+        conn:Disconnect()
+        fnConnect()
+    end
+
+    -- Create and setup Polling
+    timerPoll = Timer.New()
+
+    timerPoll.EventHandler = function(timer)
+        fnPoll()
+    end
+
+    function fnInitPoll(activate)
+        timerPoll:Stop()
+        if activate == true then
+            timerPoll:Start(20)
+        end
+    end
+
+    function fnPoll()
+        -- Poll the Info
+        every_other = not every_other
+        fnSend("I")
+        fnSend(string.char(27) .. "0LS" .. string.char(10))
+        if every_other then
+            fnSend("X")
+        end
+    end
+
+    -- Data Sending Helper Function
+    function fnSend(cmd)
+        -- Send to device
+        print("-->Extron::" .. cmd)
+        conn:Write(cmd)
+        -- Reset Polling
+        fnInitPoll(true)
+    end
+
+    function fnInit()
+        fnSend(string.char(27) .. "3CV" .. string.char(10)) -- Set Verbose Mode to full comms
+        fnSend("X") -- Get Front panel lock status
+        fnSend(string.char(27) .. "CN" .. string.char(10)) -- Get device name
+    end
+
+    function switcher_feedback(inp)
+        Controls["switcher_output"].String = inp
+        for i = 1, max_sources do
+            Controls["input_select_" .. i].Boolean = false
+        end
+        if inp ~= "0" then
+            Controls["input_select_" .. inp].Boolean = true
+        end
+    end
+
+    function switch_command(inp) -- Potentially add an if statement if a toggle for audio link is implemented
+        fnSend(inp .. "!")
+    end
+
+    function mute_feedback()
+        --TODO
+    end
+
+    -- Setup Utility Callbacks as required
+    conn.Connected = function(conn)
+        print("TCP socket is Connected")
+        Controls["ip_address"].Value = 0
+        -- Set a timer to wait for connection to establish
+        Timer.CallAfter(fnInit, 1)
+    end
+    conn.Reconnect = function(conn)
+        Controls["ip_address"].Value = 5
+        print("TCP socket is Reconnecting")
+    end
+    conn.Closed = function(conn)
+        Controls["ip_address"].Value = 3
+        print("TCP socket was closed by the remote end")
+        fnInitPoll(false)
+    end
+    conn.Error = function(conn, err)
+        Controls["ip_address"].Value = 2
+        print("TCP socket had an error ::")
+        print(err)
+    end
+    conn.Timeout = function(conn, err)
+        Controls["ip_address"].Value = 2
+        print("TCP socket had an timeout ::")
+        print(err)
+    end
+
+    -- Helper Function - Open TCP Connection
+    function fnConnect()
+        -- Open Connection
+        conn:Connect(Extron.Host, Extron.Port)
+        print("TCP socket is Connecting")
+        -- Set IP address value
+        if Controls["ip_address"] then
+            Controls["ip_address"].String = Extron.Host .. ":" .. Extron.Port
+        end
+    end
+
+    local function split(str, delim)
+        local result = {}
+        for part in str:gmatch("[^" .. delim .. "]+") do
+            result[#result + 1] = part
+        end
+        return result
+    end
+
+    -- Setup Data Callbacks as required
+    conn.Data = function(conn)
+        -- Read out lines from the buffer
+        line = conn:ReadLine(TcpSocket.EOL.Any)
+        while (line ~= nil) do
+            -- Print Line
+            print(line)
+            if line:sub(1, 3) == "Pno" then
+                Controls.part_no.String = line:sub(4, -1)
+                timerComms:Stop()
+                if Controls.online then -- Check for when developing in a Control Script block
+                    Controls.online.Boolean = true
+                end
+                timerComms:Start(30)
+            elseif line:sub(1, 3) == "Vrb" then
+                -- Get Meta Data
+                fnSend("I")
+                fnSend("N")
+                fnSend("Q")
+                fnSend("1I")
+                -- Start Polling
+                fnPoll()
+            elseif line:sub(1, 5) == "Inf01" then
+                local model_name = line:sub(7, -1)
+                local model_no = string.match(model_name, "SW(%d+)")
+                --local model_no = string.match(Controls["model"].String, "SW(%d+)")
+                if model_no == string.sub(Properties["Model"].Value, 3, 3) then
+                    Controls["model"].Value = 0
+                else
+                    Controls["model"].Value = 1
+                end
+                Controls["model"].String = model_name
+            elseif line:sub(1, 5) == "Ver01" then
+                Controls.firmware_version.String = line:sub(7, -1)
+            elseif line:sub(1, 3) == "Sig" then
+                -- Split up the Signals
+                for p, data in ipairs(split(line:sub(4, -3), " ")) do
+                    Controls["input_signal_" .. p].Value = (data == "1")
+                end
+            elseif line:sub(1, 3) == "Vmt" then
+                Controls["video_mute"].Boolean = tonumber(line:sub(4, 4)) == 1
+                Controls["sync_mute"].Boolean = tonumber(line:sub(4, 4)) == 2
+                mute_feedback()
+            elseif line:sub(1, 3) == "Amt" then
+                Controls["audio_mute"].Boolean = tonumber(line:sub(4, 4)) == 1
+                mute_feedback()
+            elseif line:sub(1, 3) == "Sig" then
+                -- Split up the Signals
+                for p, data in ipairs(split(line:sub(4, -3), " ")) do
+                    Controls["input_signal_" .. p].Value = (data == "1")
+                end
+                print("Output active: " .. line:sub(-1, -1))
+            elseif string.find(line, "In%d+ All") ~= nil then
+                local inp = string.match(line, "In(%d+) All")
+                switcher_feedback(inp)
+            elseif line:sub(1, 3) == "Ipn" then
+                Controls["device_name"].String = line:sub(5, -1)
+            elseif line:sub(1, 3) == "Exe" then
+                local lockout_mode = line:sub(4, 4) + 1
+                Controls["front_panel_lock"].String = Controls["front_panel_lock"].Choices[lockout_mode]
+            elseif line:sub(1, 4) == "Ausw" then
+                local ausw = line:sub(5, 5) + 1
+                Controls["autoswitch_mode"].String = Controls["autoswitch_mode"].Choices[ausw]
+            elseif line == "E01" then
+                print("Error: Invalid input channel (out of range)")
+            elseif line == "E06" then
+                print("Error: Invalid input during auto-input switching")
+            elseif line == "E10" then
+                print("Error: Invalid command (May be due to auto-switch mode)")
+            elseif line == "E13" then
+                print("Error: Invalid value (out of range)")
+            end
+            -- Get New Line
+            line = conn:ReadLine(TcpSocket.EOL.Any)
+        end
+    end
+
+    -- Set IP address from Properties if present
+    if Properties then
+        if Properties["IP Address"].Value ~= "" then
+            Extron.Host = Properties["IP Address"].Value
+            fnConnect()
+        else
+            print("IP Address Property Not Set")
+        end
+    end
+    Controls["front_panel_lock"].Choices = {"Unlocked", "Locked", "Partial"}
+    Controls["front_panel_lock"].EventHandler = function()
+        for k, v in ipairs(Controls["front_panel_lock"].Choices) do
+            if Controls["front_panel_lock"].String == v then
+                fnSend(tostring(k - 1) .. "X")
+            end
+        end
+    end
+    Controls["autoswitch_mode"].Choices = {"Off", "Prioritise Highest", "Prioritise Lowest"}
+    Controls["autoswitch_mode"].EventHandler = function()
+        for k, v in ipairs(Controls["autoswitch_mode"].Choices) do
+            if Controls["autoswitch_mode"].String == v then
+                fnSend(string.char(27) .. tostring(k - 1) .. "AUSW" .. string.char(10))
+            end
+        end
+    end
+    Controls["program_volume_mute"].EventHandler = function()
+        if Controls["program_volume_mute"].Boolean then
+            fnSend(string.char(27) .. "D2*1GPRM" .. string.char(10))
+        else
+            fnSend(string.char(27) .. "D2*0GPRM" .. string.char(10))
+        end
+    end
+    Controls["mic_volume_mute"].EventHandler = function()
+        if Controls["mic_volume_mute"].Boolean then
+            fnSend(string.char(27) .. "D4*1GPRM" .. string.char(10))
+        else
+            fnSend(string.char(27) .. "D4*0GPRM" .. string.char(10))
+        end
+    end
+    Controls["output_volume_mute"].EventHandler = function()
+        if Controls["output_volume_mute"].Boolean then
+            fnSend(string.char(27) .. "D7*1GPRM" .. string.char(10))
+        else
+            fnSend(string.char(27) .. "D7*0GPRM" .. string.char(10))
+        end
+    end
+    -- Loop through all Controls and setup Event Handlers
+    for k, v in pairs(Controls) do
+        -- Setup anything with "Source..."
+        if k == "SourceSelectVal" then
+            v.EventHandler = function(changedControl)
+                -- print Out
+                print("Switch " .. changedControl.Value)
+                -- Send command
+                fnSend(math.tointeger(changedControl.Value) .. "!")
+            end
+        elseif k == "SourceSelectBtn" then
+            for s = 1, MaxSources do
+                v[s].EventHandler = function(changedControl)
+                    -- print Out
+                    print("Switch " .. s)
+                    -- Send command
+                    fnSend(math.tointeger(s) .. "!")
+                end
+            end
+        end
+    end
+end
