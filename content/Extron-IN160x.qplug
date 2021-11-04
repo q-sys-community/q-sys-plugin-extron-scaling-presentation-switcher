@@ -121,6 +121,13 @@ function GetControls(props)
             UserPin = true
         },
         {
+            Name = "video_mute",
+            ControlType = "Button",
+            ButtonType = "Toggle",
+            PinStyle = "Both",
+            UserPin = true
+        },
+        {
             Name = "switcher_output",
             ControlType = "Text",
             PinStyle = "Both",
@@ -462,6 +469,17 @@ function GetControlLayout(props)
         Position = {3 * btn_size[1], title_size[2] + (5.5 * btn_size[2])},
         Size = {3 * btn_size[1], btn_size[2]}
     }
+    layout["video_mute"] = {
+        PrettyName = "Switcher~Video Mute",
+        Style = "Button",
+        Legend = "Mute",
+        Color = Colors.Red,
+        Position = {
+            (switcher_groupbox_position[1] + 2 * btn_size[1]),
+            (switcher_groupbox_position[2] + 0.5 * btn_size[2])
+        },
+        Size = btn_size
+    }
     layout["switcher_output"] = {
         PrettyName = "Switcher~Select",
         Style = "Text",
@@ -587,7 +605,7 @@ if Controls then
     function fnInitPoll(activate)
         timerPoll:Stop()
         if activate == true then
-            timerPoll:Start(20)
+            timerPoll:Start(5)
         end
     end
 
@@ -615,7 +633,14 @@ if Controls then
     function fnInit()
         fnSend(string.char(27) .. "3CV" .. string.char(10)) -- Set Verbose Mode to full comms
         fnSend("X") -- Get Front panel lock status
-        fnSend(string.char(27) .. "CN" .. string.char(10)) -- Get device name
+        fnSend(string.char(27) .. "CN" .. string.char(10)) 
+        fnSend("B")
+        fnSend(string.char(27) .. "D2GRPM" .. string.char(10))
+        fnSend(string.char(27) .. "D4GRPM" .. string.char(10))
+        fnSend(string.char(27) .. "D7GRPM" .. string.char(10))
+        fnSend(string.char(27) .. "D1GRPM" .. string.char(10))
+        fnSend(string.char(27) .. "D3GRPM" .. string.char(10))
+        fnSend(string.char(27) .. "D8GRPM" .. string.char(10))
     end
 
     function switcher_feedback(inp)
@@ -630,10 +655,6 @@ if Controls then
 
     function switch_command(inp) -- Potentially add an if statement if a toggle for audio link is implemented
         fnSend(inp .. "!")
-    end
-
-    function mute_feedback()
-        --TODO
     end
 
     -- Setup Utility Callbacks as required
@@ -711,7 +732,7 @@ if Controls then
                 fnPoll()
             elseif line:sub(1, 5) == "Inf01" then
                 local model_name = line:sub(7, -1)
-                Controls.model,String = model_name
+                Controls.model.String = model_name
             elseif line:sub(1, 5) == "Ver01" then
                 Controls.firmware_version.String = line:sub(7, -1)
             elseif line:sub(1, 3) == "Sig" then
@@ -720,14 +741,20 @@ if Controls then
                     Controls["input_signal_" .. p].Value = (data == "1")
                 end
             elseif line:sub(1, 3) == "Vmt" then
-                Controls["video_mute"].Boolean = tonumber(line:sub(4, 4)) == 1
-                Controls["sync_mute"].Boolean = tonumber(line:sub(4, 4)) == 2
-                mute_feedback()
-            elseif line:sub(1, 3) == "Amt" then
-                Controls["audio_mute"].Boolean = tonumber(line:sub(4, 4)) == 1
-                mute_feedback()
+                Controls["video_mute"].Boolean = line:sub(4, 4) ~= "0"
+            elseif line:sub(1, 6) == "GrpmD1" then
+                Controls["program_volume_gain"].Value = line:sub(8,-1)
+            elseif line:sub(1, 6) == "GrpmD3" then
+                Controls["mic_volume_gain"].Value = line:sub(8,-1)
+            elseif line:sub(1, 6) == "GrpmD8" then
+                Controls["output_volume_gain"].Value = line:sub(8,-1)
+            elseif line:sub(1, 6) == "GrpmD2" then
+                Controls["program_volume_mute"].Boolean = line:sub(8,8) ~= "0"
+            elseif line:sub(1, 6) == "GrpmD4" then
+                Controls["mic_volume_mute"].Boolean = line:sub(8,8) ~= "0"
+            elseif line:sub(1, 6) == "GrpmD7" then
+                Controls["output_volume_mute"].Boolean = line:sub(8,8) ~= "0"
             elseif line:sub(1, 4) == "In00" then
-                -- Split up the Signals
                 for p, data in ipairs(split(line:sub(6, -1), "*")) do
                     Controls["input_signal_" .. p].Value = (data == "1")
                 end
@@ -750,8 +777,8 @@ if Controls then
                 print("Error: Invalid command (May be due to auto-switch mode)")
             elseif line == "E13" then
                 print("Error: Invalid value (out of range)")
-            elseif line:find("Extron Electronics") ~= nil then
-                Controls.model.String = line:match("Extron Electronics, (%w+), ")
+            --elseif line:find("Extron Electronics") ~= nil then
+                --Controls.model.String = line:match("Extron Electronics, (%w+), ")
             end
             -- Get New Line
             line = conn:ReadLine(TcpSocket.EOL.Any)
@@ -786,25 +813,41 @@ if Controls then
             end
         end
     end
+    Controls["video_mute"].EventHandler = function()
+        if Controls["video_mute"].Boolean then
+            fnSend("1B")
+        else
+            fnSend("0B")
+        end
+    end
+    Controls["program_volume_gain"].EventHandler = function()
+        fnSend(string.char(27) .. "D1*" .. Controls["program_volume_gain"].Value .. "GRPM" .. string.char(10))
+    end
+    Controls["mic_volume_gain"].EventHandler = function()
+        fnSend(string.char(27) .. "D3*" .. Controls["mic_volume_gain"].Value .. "GRPM" .. string.char(10))
+    end
+    Controls["output_volume_gain"].EventHandler = function()
+        fnSend(string.char(27) .. "D8*" .. Controls["output_volume_gain"].Value .. "GRPM" .. string.char(10))
+    end
     Controls["program_volume_mute"].EventHandler = function()
         if Controls["program_volume_mute"].Boolean then
-            fnSend(string.char(27) .. "D2*1GPRM" .. string.char(10))
+            fnSend(string.char(27) .. "D2*1GRPM" .. string.char(10))
         else
-            fnSend(string.char(27) .. "D2*0GPRM" .. string.char(10))
+            fnSend(string.char(27) .. "D2*0GRPM" .. string.char(10))
         end
     end
     Controls["mic_volume_mute"].EventHandler = function()
         if Controls["mic_volume_mute"].Boolean then
-            fnSend(string.char(27) .. "D4*1GPRM" .. string.char(10))
+            fnSend(string.char(27) .. "D4*1GRPM" .. string.char(10))
         else
-            fnSend(string.char(27) .. "D4*0GPRM" .. string.char(10))
+            fnSend(string.char(27) .. "D4*0GRPM" .. string.char(10))
         end
     end
     Controls["output_volume_mute"].EventHandler = function()
         if Controls["output_volume_mute"].Boolean then
-            fnSend(string.char(27) .. "D7*1GPRM" .. string.char(10))
+            fnSend(string.char(27) .. "D7*1GRPM" .. string.char(10))
         else
-            fnSend(string.char(27) .. "D7*0GPRM" .. string.char(10))
+            fnSend(string.char(27) .. "D7*0GRPM" .. string.char(10))
         end
     end
     Controls["switcher_output"].EventHandler = function()
